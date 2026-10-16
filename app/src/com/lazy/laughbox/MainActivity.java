@@ -5,7 +5,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.Matrix;
+import android.content.res.Configuration;
 import android.graphics.SurfaceTexture;
 import android.media.MediaPlayer;
 import android.net.Uri;
@@ -21,6 +21,8 @@ import android.view.Surface;
 import android.view.TextureView;
 import android.view.TextureView.SurfaceTextureListener;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.WindowManager;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
@@ -144,6 +146,10 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         super.onResume();
         resumed = true;
         goImmersive();
+        // 回到前台后可视区域可能变了（状态栏/导航栏），重算一次
+        video.post(new Runnable() {
+            @Override public void run() { fitVideo(); }
+        });
         handler.removeCallbacks(autoPlay);
         if (loopMode) handler.postDelayed(autoPlay, 200);
     }
@@ -312,6 +318,7 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
             p.setOnVideoSizeChangedListener(new MediaPlayer.OnVideoSizeChangedListener() {
                 @Override public void onVideoSizeChanged(MediaPlayer pl, int w, int h) {
                     if (w > 0 && h > 0) { vw = w; vh = h; fitVideo(); }
+                    Log.i(TAG, "videoSize=" + w + "x" + h);
                 }
             });
             p.setOnErrorListener(new MediaPlayer.OnErrorListener() {
@@ -490,17 +497,39 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         } catch (Exception ignored) {}
     }
 
-    // ---------------- 视频等比居中 ----------------
-
+    /**
+     * 让视频按 4:7 等比缩放并居中。
+     *
+     * 这里刻意**不用** TextureView.setTransform()：那条路依赖矩阵，
+     * 在真机上容易因为调用时序（SurfaceTexture 刚建、view 还没测量）而没生效，
+     * 一旦 transform 缺失，TextureView 会把视频拉伸铺满全屏 —— 就是"比例不对"。
+     *
+     * 改成直接把 TextureView 的尺寸设成 contain 后的实际像素大小，
+     * 再由父容器的 gravity=center 完成居中。语义上和待机图的
+     * scaleType="fitCenter" 完全一致，切换时不会跳变。
+     */
     private void fitVideo() {
         if (video == null) return;
-        int w = video.getWidth(), h = video.getHeight();
-        if (w == 0 || h == 0 || vw == 0 || vh == 0) return;
-        float s = Math.min((float) w / vw, (float) h / vh);
-        Matrix m = new Matrix();
-        m.setScale(s, s);
-        m.postTranslate((w - vw * s) / 2f, (h - vh * s) / 2f);
-        video.setTransform(m);
+        ViewParent parent = video.getParent();
+        if (!(parent instanceof ViewGroup)) return;
+
+        // 用**父容器**尺寸算，避免用 video 自身尺寸造成自我依赖的死循环
+        int pw = ((ViewGroup) parent).getWidth();
+        int ph = ((ViewGroup) parent).getHeight();
+        if (pw == 0 || ph == 0 || vw == 0 || vh == 0) return;
+
+        float s = Math.min((float) pw / vw, (float) ph / vh);
+        int tw = Math.max(1, Math.round(vw * s));
+        int th = Math.max(1, Math.round(vh * s));
+
+        ViewGroup.LayoutParams lp = video.getLayoutParams();
+        // 唯一的守卫：已经在位就别再 setLayoutParams。
+        // 注意不要拿"父容器尺寸"做缓存——若 onVideoSizeChanged 回报了与默认值
+        // 不同的 vw/vh，那种缓存会静默吞掉重算，导致又变回"比例不对"。
+        if (lp.width == tw && lp.height == th) return;
+        lp.width = tw;
+        lp.height = th;
+        video.setLayoutParams(lp);
     }
 
     // ---------------- 设置面板 ----------------
@@ -567,7 +596,21 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) goImmersive();
+        if (hasFocus) {
+            goImmersive();
+            // 沉浸式开关会改变可视区域，重算一次
+            video.post(new Runnable() {
+                @Override public void run() { fitVideo(); }
+            });
+        }
+    }
+
+    /** manifest 吞掉了 screenSize，分屏 / 折叠屏展开时窗口尺寸变化不会重建 Activity */
+    @Override public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        video.post(new Runnable() {
+            @Override public void run() { fitVideo(); }
+        });
     }
 
     // ---------------- TextureView 回调 ----------------
@@ -579,11 +622,20 @@ public class MainActivity extends Activity implements TextureView.SurfaceTexture
         if (mp != null && !surfaceAttached) {
             try { mp.setSurface(surface); surfaceAttached = true; } catch (Exception ignored) {}
         }
-        fitVideo();
+        // 布局通常还没测量完，post 到下一帧再算
+        video.post(new Runnable() {
+            @Override public void run() { fitVideo(); }
+        });
         if (wantPlay && resumed) play();     // 兑现之前记下的播放意图
     }
 
-    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) { fitVideo(); }
+    @Override public void onSurfaceTextureSizeChanged(SurfaceTexture st, int w, int h) {
+        // 该回调可能在 layout pass 期间派发，setLayoutParams 必须 post 出去，
+        // 否则 ViewRootImpl 会打 "requestLayout() improperly called ... during layout"
+        video.post(new Runnable() {
+            @Override public void run() { fitVideo(); }
+        });
+    }
 
     @Override public boolean onSurfaceTextureDestroyed(SurfaceTexture st) {
         surfaceReady = false;
