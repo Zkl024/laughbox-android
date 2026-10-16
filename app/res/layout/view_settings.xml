@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="设置"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="@color/ink" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="笑声音量"
+        android:textSize="14sp"
+        android:textColor="#FF666666" />
+
+    <SeekBar
+        android:id="@+id/seekVolume"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:max="100"
+        android:progress="100" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="笑到震动"
+            android:textSize="15sp"
+            android:textColor="@color/ink" />
+
+        <Switch
+            android:id="@+id/swVibe"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="本 App 没有任何实用功能，祝你心情好。"
+        android:textSize="12sp"
+        android:textColor="#FFAAAAAA" />
+
+</LinearLayout>

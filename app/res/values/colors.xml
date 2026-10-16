@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FFFFFFFF</color>
+    <color name="ink">#FF1A1A1A</color>
+    <color name="pill">#E6141414</color>
+    <color name="pill_on">#FFFF7A2E</color>
+    <color name="hint">#FFB0B0B0</color>
+</resources>
