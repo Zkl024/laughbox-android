@@ -84,8 +84,8 @@ echo "==> [2/6] aapt2 link（生成资源 APK + R.java）"
   -A "$APP/assets" \
   --min-sdk-version 21 \
   --target-sdk-version 34 \
-  --version-code 1 \
-  --version-name 1.0 \
+  --version-code 2 \
+  --version-name 1.1.0 \
   --auto-add-overlay \
   "$OUT/res/res.zip"
 

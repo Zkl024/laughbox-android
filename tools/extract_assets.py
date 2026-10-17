@@ -32,12 +32,18 @@ from PIL import Image
 # ── 裁切参数（针对 720x1280 竖屏录屏）──────────────────────────────
 CROP_X, CROP_W = 66, 588          # App 内容区：两侧各有 66px 黑边
 CROP_Y, CROP_H = 40, 1028
-OUT_W, OUT_H = 720, 1260          # 4:7，宏块 45x79=3555 ≤ Level3.1 MaxFS(3600)
+OUT_W, OUT_H = 1080, 1890         # 4:7
+#   1080x1890 → 宏块 68x119 = 8092 ≤ MaxFS 8192（Level 4.0 起）
+#   60fps → MBPS = 8092 x 60 = 485,520 > 4.0/4.1 的 245,760
+#   → 必须 Level 4.2（MaxMBPS 522,240）。老设备硬解不了 1080p60，
+#     app 内 onError 会 toast「这台设备放不出来…」。
+#     若要覆盖 Android 5.0–6.0，把 OUT_W/H 降回 720x1260 且 Level 3.1。
 
 # 静音段通常就是待机段；笑声响起点即循环动画起点
 IDLE_SEC = 1.0
 LOOP_FRAMES = 170                 # 扫描得到的循环周期（30fps → 5.67s）
 FPS = 30
+FPS_OUT = 60                      # 目标帧率，30fps 录屏靠 minterpolate 插帧
 
 
 def run(cmd):
@@ -157,9 +163,11 @@ def main():
     idle_src = os.path.join(tmp, "idle.jpg")
     grab(clean, IDLE_SEC, idle_src)
     im = Image.open(idle_src).convert("RGB")
-    im = im.resize((OUT_W, int(im.height * OUT_W / im.width)), Image.LANCZOS)
+    # 必须与视频走**完全相同**的缩放目标（OUT_W x OUT_H），
+    # 否则待机图比视频小 0.1%，点击切换时角色会轻微跳动。
+    im = im.resize((OUT_W, OUT_H), Image.LANCZOS)
     canvas = Image.new("RGB", (OUT_W, OUT_H), (255, 255, 255))
-    canvas.paste(im, (0, (OUT_H - im.height) // 2))
+    canvas.paste(im, (0, 0))
     idle_out = os.path.join(root, "app/res/drawable-nodpi/hero_idle.png")
     os.makedirs(os.path.dirname(idle_out), exist_ok=True)
     canvas.save(idle_out, optimize=True)
@@ -168,16 +176,26 @@ def main():
     print("▸ 生成大笑视频（保留原声）")
     laugh_out = os.path.join(root, "app/assets/laugh.mp4")
     os.makedirs(os.path.dirname(laugh_out), exist_ok=True)
+    # 关键坑 1：minterpolate 固定少吐 3 帧（171 帧 30fps → 339 帧而非 342），
+    #          循环会短 1 帧、首尾对不齐，接缝处有顿挫。
+    #          解决办法：插帧**前**用 tpad 给输入补 1 帧（克隆末帧 ≈ 起点帧），
+    #          输出正好 341 帧 = 340 周期 + 1，末帧回到起点姿态。
+    # 关键坑 2：不要在 minterpolate 之后再接 fps=60 去凑帧数——
+    #          那会让 fps 滤镜**复制**末帧而不是插值，尾几帧被冻住。
+    #          实测冻结版 wrap 差 3.85（等于原 30fps 的 frame-169 相位），
+    #          tpad 版 wrap 差 2.035（噪声底噪，与 v1.0.1 的 2.041 齐平）。
     run(["ffmpeg", "-v", "error",
          "-ss", f"{t0:.3f}", "-t", f"{dur:.3f}", "-i", clean,
          "-ss", f"{t0:.3f}", "-t", f"{dur:.3f}", "-i", src,
          "-filter_complex",
-         f"[0:v]scale={OUT_W}:{OUT_H - 2}:flags=lanczos,"
-         f"pad={OUT_W}:{OUT_H}:0:1:color=white[v];"   # 注意 color=white
+         f"[0:v]scale={OUT_W}:{OUT_H}:flags=lanczos,"
+         f"tpad=stop_mode=clone:stop_duration={1 / FPS:.4f},"
+         f"minterpolate=fps={FPS_OUT}:mi_mode=mci:mc_mode=aobmc:"
+         f"me_mode=bidir:vsbmc=1[v];"
          "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=44100[a]",
          "-map", "[v]", "-map", "[a]",
-         "-c:v", "libx264", "-profile:v", "baseline", "-level", "3.1",
-         "-pix_fmt", "yuv420p", "-crf", "23", "-preset", "slow",
+         "-c:v", "libx264", "-profile:v", "baseline", "-level", "4.2",
+         "-pix_fmt", "yuv420p", "-crf", "20", "-preset", "slow",
          "-movflags", "+faststart",
          "-c:a", "aac", "-b:a", "64k", "-ar", "44100", "-ac", "1",
          laugh_out, "-y"])
